@@ -1,0 +1,10 @@
+requests
+pandas
+numpy
+matplotlib
+seaborn
+python-dotenv
+statsmodels
+xgboost
+scikit-learn
+jupyter
