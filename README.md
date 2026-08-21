@@ -3,7 +3,7 @@
 Proyecto de series temporales que predice la demanda eléctrica horaria en la península ibérica utilizando datos reales de la API de ESIOS (Red Eléctrica de España).
 
 ## Objetivo
-Predecir la demanda eléctrica horaria a partir de patrones temporales (hora, día de la semana, mes) y valores pasados (lags), mediante un pipeline completo: extracción vía API → EDA → feature engineering → modelado → validación.
+Predecir la demanda eléctrica horaria a partir de patrones temporales (hora, día de la semana, mes) y valores pasados (lags), mediante un pipeline completo: extracción vía API → EDA → feature engineering → modelado → validación, comparando un modelo de machine learning (XGBoost) con uno estadístico clásico (SARIMA).
 
 ## Datos
 - **Fuente**: [API ESIOS](https://api.esios.ree.es) (Red Eléctrica de España), indicador 1293 ("Demanda real")
@@ -14,8 +14,6 @@ Predecir la demanda eléctrica horaria a partir de patrones temporales (hora, d�
 - Patrones claros de estacionalidad anual (más demanda en invierno y verano), semanal (menos demanda los fines de semana) y diaria (picos por la mañana y por la tarde-noche)
 - **Evento atípico identificado**: el 28 de abril de 2025 se produjo un apagón eléctrico masivo en la península. En lugar de eliminar estos datos, se marcó con una variable binaria (`is_blackout`) para preservar la continuidad de la serie, y se excluyó del cálculo de métricas de evaluación
 
-<!-- ![Demanda anual](outputs/demand_yearly.png) -->
-
 ## Feature engineering
 - Variables temporales cíclicas (sin/cos) para hora y mes, para capturar correctamente la continuidad (ej: hora 23 y hora 0 son consecutivas)
 - Lags de 24h y 168h (una semana), los predictores más fuertes en este tipo de serie
@@ -24,11 +22,17 @@ Predecir la demanda eléctrica horaria a partir de patrones temporales (hora, d�
 Código reutilizable centralizado en `src/data_prep.py`.
 
 ## Modelado y validación
-- **Modelo**: XGBoost Regressor
-- **Validación**: `TimeSeriesSplit` (5 folds), respetando el orden temporal para evitar data leakage (crucial en series temporales, ya que un split aleatorio filtraría información del futuro a través de los lags)
-- **Métricas**: MAPE y RMSE, excluyendo el día del apagón del cálculo
+
+Se compararon dos enfoques:
+
+- **XGBoost Regressor**: usa features temporales explícitas (hora, día de la semana, mes, variables cíclicas) y lags (24h, 168h)
+- **SARIMA** (estacionalidad 24h): modelo estadístico clásico que solo usa la serie de valores pasados
+
+**Validación**: `TimeSeriesSplit` (5 folds), respetando el orden temporal para evitar data leakage (crucial en series temporales, ya que un split aleatorio filtraría información del futuro a través de los lags). Para SARIMA, el horizonte de predicción se limitó a 1 semana por fold (en lugar de todo el bloque de test), ya que horizontes más largos degradan drásticamente su precisión por la acumulación de error en la diferenciación (d=1, D=1) — una limitación conocida de este tipo de modelo frente a XGBoost, que predice cada punto de forma independiente usando los lags reales.
 
 ### Resultados
+
+**XGBoost** (5 folds, bloque completo por fold):
 | Fold | MAPE | RMSE (MW) |
 |------|------|-----------|
 | 1    | 9.44%| 37,495    |
@@ -38,15 +42,24 @@ Código reutilizable centralizado en `src/data_prep.py`.
 | 5    | 4.29%| 20,789    |
 | **Media** | **5.33%** | **22,603** |
 
-El fold 1 tiene un error más alto por disponer de menos historia de entrenamiento. A medida que el modelo tiene más datos pasados, el error disminuye.
+**SARIMA** (5 folds, horizonte de 1 semana):
+| Fold | MAPE | RMSE (MW) |
+|------|------|-----------|
+| 1    | 51.02%| 197,161  |
+| 2    | 19.43%| 64,176   |
+| 3    | 26.01%| 101,620  |
+| 4    | 17.72%| 64,185   |
+| 5    | 58.34%| 192,612  |
+| **Media** | **34.50%** | **123,951** |
 
-![Predicción vs real](outputs/prediction_vs_real.png)
-![Zoom semanal](outputs/prediction_zoom_week.png)
+![Comparación de modelos](outputs/comparison_xgb_sarima.png)
+
+**Conclusión**: XGBoost supera claramente a SARIMA en este problema (MAPE medio de 5.33% frente a 34.50%), principalmente porque puede aprovechar los lags reales (24h, 168h) en cada predicción, mientras que SARIMA genera el horizonte completo sin realimentación de datos reales, acumulando error progresivamente incluso en una ventana de solo una semana (visible en el gráfico, donde la predicción de SARIMA se aleja cada vez más de los valores reales). SARIMA sigue siendo útil como referencia estadística clásica, pero XGBoost es claramente más adecuado para este problema.
 
 ## Limitaciones y próximas mejoras
-- El modelo tiende a infrapredecir los picos de demanda, especialmente en invierno — probablemente por no incluir datos de temperatura, un factor clave en picos de consumo por calefacción
-- Se podría comparar con un modelo estadístico clásico (SARIMA) como alternativa
+- XGBoost tiende a infrapredecir los picos de demanda, especialmente en invierno — probablemente por no incluir datos de temperatura, un factor clave en picos de consumo por calefacción
 - Incorporar datos meteorológicos (AEMET) como variable explicativa
+- Explorar modelos híbridos o redes neuronales recurrentes (LSTM) como siguiente paso
 
 ## Estructura del proyecto
 ├── data/ # datos brutos descargados
